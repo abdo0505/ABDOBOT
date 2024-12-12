@@ -1,109 +1,90 @@
-import pkg from '@whiskeysockets/baileys';
 import fetch from 'node-fetch';
-const { generateWAMessageFromContent, proto, prepareWAMessageMedia } = pkg;
 
 let handler = async (m, { conn, args, text, usedPrefix, command }) => {
-    if (command === 'apk') {
-        if (!args[0]) throw 'Ex: ' + usedPrefix + command + ' Facebook lite';
-        await m.reply("*LOADING...*");
-        let q = text;
-        let apiUrl = `https://mee-api.vercel.app/api/apkpure?q=${q}`;
-        let response = await fetch(apiUrl);
-        if (!response.ok) throw 'Error fetching APK data';
+  if (!args[0]) throw '*Download applications with the additional obb file* \n\n Example :\n ' + usedPrefix + command + ' free fire';
+  let info = await apkinfo(text);
+  let res = await apk(text);
 
-        let apkData = await response.json();
-        if (!apkData || apkData.length === 0) throw 'No APK data found';
+  if (res.size > 2000000000) {
+    throw '*APK file too large. Maximum download size is 2GB.*';
+  }
 
-        const list = apkData.map((app, index) => {
-            let json = JSON.stringify({
-                downloadUrl: app.downloadUrl,
-                downloadType: app.downloadType,
-                packageName: app.packageName
-            });
+  let message = await conn.sendMessage(m.chat, {
+    image: { url: info.icon },
+    caption: `*App Name:* \n${info.name}\n*Package Name:* \n${info.packageN} \n\n> *JEEN-MD*`,
+    footer: '_Apk files...',
+  });
 
-            return {
-                title: `App ${index + 1}: ${app.title}`,
-                rows: [
-                    {
-                        title: app.title,
-                        id: `${usedPrefix}doapk ${json}`
-                    }
-                ]
-            };
-        });
+ 
+  await conn.sendMessage(
+    m.chat,
+    { document: { url: res.download }, mimetype: res.mimetype, fileName: res.fileName },
+    { quoted: m }
+  );
 
-        const sections = list.map((item) => {
-            return {
-                title: item.title,
-                rows: item.rows
-            };
-        });
+  if (info.obb) {
+    await conn.sendMessage(m.chat, {
+      text: `Downloading OBB file for ${info.name}...`,
+    });
 
-        const buttonParamsJson = JSON.stringify({
-            title: "Available APKs",
-            sections: sections
-        });
-        
-        let icon = apkData[0].icon;
-        if (!icon) throw 'No icon found for the APK!';
+    let obbRes = await fetch(info.obb_link);
+    let obbMimetype = obbRes.headers.get('content-type');
 
-        const interactiveMessage = {
-            body: { text: "Choose an APK to download :" },
-            footer: { text: "_by JeenTeam_" },
-            header: {
-                hasMediaAttachment: true,
-                ...(await prepareWAMessageMedia({ image: { url: icon } }, { upload: conn.waUploadToServer }))
-            },
-            nativeFlowMessage: {
-                buttons: [{
-                    name: "single_select",
-                    buttonParamsJson
-                }]
-            }
-        };
-
-        const message = {
-            messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
-            interactiveMessage
-        };
-
-        await conn.relayMessage(m.chat, { viewOnceMessage: { message } }, {});
-    } else if (command === 'doapk') {
-        if (!text) throw 'Error: No data provided.';
-        
-        const json = text;
-        const parsedData = JSON.parse(json);
-        
-        await m.reply("Please Wait 🫸🏻");
-        
-        const downloadUrl = parsedData.downloadUrl;
-        const packageName = parsedData.packageName;
-        let downloadType = parsedData.downloadType;
-
-        if (downloadType !== 'apk' && downloadType !== 'xapk') {
-            downloadType = 'apk';
-        }
-
-        let mimetype = (await fetch(downloadUrl, { method: 'head' })).headers.get('content-type');
-        let size = (await fetch(downloadUrl, { method: 'head' })).headers.get('Content-Length');
-
-        if (size > 699 * 1024 * 1024) throw 'File size exceeds 699 MB';
-
-        let fileName = `${packageName}.${downloadType}`;
-
-        await conn.sendFile(
-            m.chat,
-            downloadUrl,
-            fileName,
-            '',
-            m,
-            false,
-            { mimetype: mimetype }
-        );
-    }
+    await conn.sendMessage(
+      m.chat,
+      { document: { url: info.obb_link }, mimetype: obbMimetype, fileName: `${info.packageN}.obb` },
+      { quoted: m }
+    );
+  }
 };
 
-handler.command = /^(apk|doapk)$/i;
-handler.help = ['apk']
-handler.tags = ['downloader']
+handler.command = /^(apk)$/i;
+handler.help = ['apk'];
+handler.tags = ['applications'];
+handler.premium = false;
+handler.limit = 5
+handler.rigister = true;
+
 export default handler;
+
+async function apkinfo(url) {
+  let res = await fetch('http://ws75.aptoide.com/api/7/apps/search?query=' + url + '&limit=1');
+  let $ = await res.json();
+
+  try {
+    let icon = $.datalist.list[0].icon;
+  } catch {
+    throw 'Failed to load the application, sorry';
+  }
+
+  let icon = $.datalist.list[0].icon;
+  let name = $.datalist.list[0].name;
+  let packageN = $.datalist.list[0].package;
+  let download = $.datalist.list[0].file.path;
+  let obb_link;
+  let obb;
+
+  try {
+    obb_link = $.datalist.list[0].obb.main.path;
+    obb = true;
+  } catch {
+    obb_link = '_Not found_';
+    obb = false;
+  }
+
+  if (!download) throw 'Failed to load the application, sorry';
+  return { obb, obb_link, name, icon, packageN };
+}
+
+async function apk(url) {
+  let res = await fetch('http://ws75.aptoide.com/api/7/apps/search?query=' + encodeURIComponent(url) + '&limit=1');
+  let $ = await res.json();
+  let fileName = $.datalist.list[0].package + '.apk';
+  let download = $.datalist.list[0].file.path;
+  let size = (await fetch(download, { method: 'head' })).headers.get('Content-Length');
+  if (!download) throw 'Failed to load the application, sorry';
+  let icon = $.datalist.list[0].icon;
+  let mimetype = (await fetch(download, { method: 'head' })).headers.get('content-type');
+
+  return { fileName, mimetype, download, size };
+      }
